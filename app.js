@@ -39,6 +39,7 @@ let selectedDailyFlock = "Gallinas";
 let activeEntryTab = "production";
 let activeHistoryTab = "production";
 let activeIncomeMode = "eggs";
+let selectedHistoryDate = "";
 let activeFlockSubtab = "plantel";
 let previewSelection = null;
 let editingEntryId = null;
@@ -550,6 +551,13 @@ function setHistoryTab(tabName) {
   renderHistory();
 }
 
+function setHistoryDateFilter(date) {
+  selectedHistoryDate = date;
+  const input = document.getElementById("historyDateFilter");
+  if (input) input.value = date;
+  renderHistory();
+}
+
 function setFlockSubtab(tabName) {
   activeFlockSubtab = tabName;
   document.querySelectorAll("#flockSubtabs .flock-subtab").forEach((btn) => {
@@ -842,8 +850,16 @@ function renderHistory() {
   };
   const config = historyConfig[activeHistoryTab];
 
-  // For income: include both independent income entries and legacy embedded income in main entries
+  // Render date filter control
+  const filterEl = document.getElementById("historyDateFilter");
+  if (filterEl) filterEl.value = selectedHistoryDate;
+
+  // Filter by month and optionally by a specific day
   const rows = sortedDaily()
+    .filter((entry) => {
+      if (selectedHistoryDate) return entry.date === selectedHistoryDate;
+      return isInSelectedMonth(entry);
+    })
     .filter((entry) => {
       if (activeHistoryTab === "income") {
         if (isIncomeEntry(entry)) return sectionHasData(entry, "income");
@@ -1681,12 +1697,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#monthSelect").addEventListener("change", (event) => {
     selectedMonth = Number(event.target.value);
-    renderDashboard();
+    selectedHistoryDate = "";
+    render();
   });
 
   $("#yearSelect").addEventListener("change", (event) => {
     selectedYear = Number(event.target.value);
-    renderDashboard();
+    selectedHistoryDate = "";
+    render();
   });
 
   $("#dailyFlockButtons").addEventListener("click", (event) => {
@@ -1715,6 +1733,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const button = event.target.closest(".history-tab[data-history-tab]");
     if (!button) return;
     setHistoryTab(button.dataset.historyTab);
+  });
+
+  document.getElementById("historyDateFilter")?.addEventListener("change", (e) => {
+    setHistoryDateFilter(e.target.value);
+  });
+  document.getElementById("historyDateClearBtn")?.addEventListener("click", () => {
+    setHistoryDateFilter("");
   });
 
   $("#date").addEventListener("change", (event) => {
