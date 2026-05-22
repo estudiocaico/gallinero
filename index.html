@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#16a34a" />
+    <title>Huevos camperos de gallinas felices</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <img src="escotilla.png" alt="" />
+        </div>
+        <div>
+          <p class="eyebrow">Huevos camperos de gallinas felices</p>
+          <h1>Resumen mensual</h1>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="openReportsBtn" class="ghost compact reports-btn" type="button" aria-label="Reportes">
+          <svg viewBox="0 0 24 24"><path d="M5 20V10"/><path d="M12 20V4"/><path d="M19 20v-7"/></svg>
+          <span>Reportes</span>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section id="home" class="panel dashboard active">
+        <div class="month-controls" aria-label="Mes a visualizar">
+          <label>
+            Mes
+            <select id="monthSelect"></select>
+          </label>
+          <label>
+            Año
+            <select id="yearSelect"></select>
+          </label>
+        </div>
+        <section class="metric-grid" aria-label="Resumen del mes">
+          <article class="metric-card moss">
+            <span class="metric-icon"><img src="huevos.png" alt="" /></span>
+            <span>Huevos del mes</span>
+            <div class="metric-split" id="dashEggs"></div>
+          </article>
+          <article class="metric-card cyan">
+            <span class="metric-icon"><img src="maiz.png" alt="" /></span>
+            <span>Comida utilizada</span>
+            <div class="metric-split" id="dashFood"></div>
+          </article>
+          <article class="metric-card indigo">
+            <span class="metric-icon"><img src="billete-de-banco.png" alt="" /></span>
+            <span>Ingresos</span>
+            <div class="metric-split" id="dashIncome"></div>
+          </article>
+          <article class="metric-card red">
+            <span class="metric-icon"><img src="factura.png" alt="" /></span>
+            <span>Gastos</span>
+            <div class="metric-split" id="dashCosts"></div>
+          </article>
+          <article class="metric-card green">
+            <span class="metric-icon"><svg viewBox="0 0 24 24"><path d="m4 17 6-6 4 4 6-8"/><path d="M14 7h6v6"/></svg></span>
+            <span>Resultado</span>
+            <div class="metric-split" id="dashResult"></div>
+          </article>
+          <article class="metric-card violet">
+            <span class="metric-icon"><svg viewBox="0 0 24 24"><path d="M12 3s6 6.2 6 11a6 6 0 0 1-12 0c0-4.8 6-11 6-11Z"/></svg></span>
+            <span>Agua consumida</span>
+            <div class="metric-split" id="dashWater"></div>
+          </article>
+          <article class="metric-card amber">
+            <span class="metric-icon"><svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-4 3 3 5-7"/></svg></span>
+            <span>Postura promedio</span>
+            <div class="metric-split" id="dashLayRate"></div>
+          </article>
+          <article class="metric-card slate">
+            <span class="metric-icon"><img src="gallina.png" alt="" /></span>
+            <span id="dashHensLabel">Aves actuales</span>
+            <div class="metric-split" id="dashHens"></div>
+          </article>
+          <article class="metric-card pink">
+            <span class="metric-icon"><img src="calavera-y-huesos.png" alt="" /></span>
+            <span>Bajas del mes</span>
+            <div class="metric-split" id="dashDeaths"></div>
+          </article>
+        </section>
+
+        <section class="preview-section">
+          <div class="section-head">
+            <h2>Últimos días cargados</h2>
+            <button id="addTodayBtn" class="ghost compact">Cargar hoy</button>
+          </div>
+          <div id="recentEntries" class="recent-list"></div>
+        </section>
+      </section>
+
+      <section id="daily" class="panel">
+        <div class="movement-head">
+          <button id="backHomeBtn" class="back-button" type="button" aria-label="Volver">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <h2>Nueva entrada</h2>
+        </div>
+        <form id="dailyForm" class="entry-form">
+          <div class="entry-card">
+            <div class="form-grid">
+              <label>
+                Fecha
+                <input type="date" id="date" required />
+              </label>
+              <div class="field-group">
+                <span>Grupo</span>
+                <div class="segmented-control compact-segments" id="dailyFlockButtons" aria-label="Grupo de la entrada">
+                  <button type="button" class="segment active" data-flock="Gallinas">Gallinas</button>
+                  <button type="button" class="segment" data-flock="Pigmeas">Pigmeas</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="movement-types" id="entryTypeTabs" aria-label="Tipo de entrada">
+            <button type="button" class="movement-type active" data-entry-tab="production">
+              <img src="huevos.png" alt="" />
+              <span>Huevos</span>
+            </button>
+            <button type="button" class="movement-type" data-entry-tab="consumption">
+              <img src="maiz.png" alt="" />
+              <span>Consumo</span>
+            </button>
+            <button type="button" class="movement-type" data-entry-tab="income">
+              <img src="billete-de-banco.png" alt="" />
+              <span>Ingreso</span>
+            </button>
+            <button type="button" class="movement-type" data-entry-tab="expense">
+              <img src="factura.png" alt="" />
+              <span>Gasto</span>
+            </button>
+          </div>
+
+          <section class="entry-section entry-panel active" data-entry-panel="production">
+            <div class="entry-section-head">
+              <span class="entry-section-icon"><img src="huevos.png" alt="" /></span>
+              <div>
+                <h2>Producción</h2>
+                <p>Huevos recolectados y pérdidas.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                Huevos mañana
+                <input type="number" id="morningEggs" min="0" step="1" placeholder="0" />
+              </label>
+              <label>
+                Huevos tarde
+                <input type="number" id="afternoonEggs" min="0" step="1" placeholder="0" />
+              </label>
+              <label>
+                Huevos perdidos/rotos
+                <input type="number" id="lostEggs" min="0" step="1" placeholder="0" />
+              </label>
+              <label class="wide">
+                Notas de producción
+                <textarea id="productionNotes" rows="3" placeholder="Calidad de huevos, postura, roturas, etc."></textarea>
+              </label>
+            </div>
+          </section>
+
+          <section class="entry-section entry-panel" data-entry-panel="consumption">
+            <div class="entry-section-head">
+              <span class="entry-section-icon"><img src="maiz.png" alt="" /></span>
+              <div>
+                <h2>Consumo</h2>
+                <p>Alimento y agua consumidos en la fecha.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                Maíz consumido (kg)
+                <input type="number" id="cornKg" min="0" step="0.01" placeholder="0" />
+              </label>
+              <label>
+                Balanceado consumido (kg)
+                <input type="number" id="feedKg" min="0" step="0.01" placeholder="0" />
+              </label>
+              <label>
+                Agua consumida (litros)
+                <input type="number" id="waterLiters" min="0" step="0.1" placeholder="0" />
+              </label>
+              <label class="wide">
+                Notas de consumo
+                <textarea id="consumptionNotes" rows="3" placeholder="Cambio de alimento, consumo inusual, limpieza de bebederos, etc."></textarea>
+              </label>
+            </div>
+          </section>
+
+          <section class="entry-section entry-panel" data-entry-panel="income">
+            <div class="entry-section-head">
+              <span class="entry-section-icon"><img src="billete-de-banco.png" alt="" /></span>
+              <div>
+                <h2>Ingresos</h2>
+                <p>Cada venta de maples o aves es una entrada independiente.</p>
+              </div>
+            </div>
+
+            <div id="currentIncomeEntries"></div>
+
+            <div class="income-form-header">
+              <span id="incomeFormLabel">Nuevo ingreso</span>
+              <button type="button" id="cancelIncomeEditBtn" class="ghost compact" hidden>Cancelar edición</button>
+            </div>
+
+            <div class="income-mode-tabs" id="incomeModeTabs" aria-label="Tipo de ingreso">
+              <button type="button" class="income-mode active" data-income-mode="eggs">
+                <img src="maple.png" alt="" />
+                <span>Maples</span>
+              </button>
+              <button type="button" class="income-mode" data-income-mode="birds">
+                <img src="gallina.png" alt="" />
+                <span>Gallinas</span>
+              </button>
+            </div>
+            <div class="form-grid">
+              <label data-income-fields="eggs">
+                Cantidad de maples (30 huevos)
+                <input type="number" id="eggCrates" min="0" step="1" placeholder="0" />
+              </label>
+              <label data-income-fields="eggs">
+                Valor del maple
+                <input type="text" id="eggCratePrice" inputmode="numeric" placeholder="$0" />
+              </label>
+              <label data-income-fields="birds">
+                Cantidad de gallinas
+                <input type="number" id="soldBirds" min="0" step="1" placeholder="0" />
+              </label>
+              <label data-income-fields="birds">
+                Valor por gallina
+                <input type="text" id="birdPrice" inputmode="numeric" placeholder="$0" />
+              </label>
+              <label class="wide">
+                Notas de ingresos
+                <textarea id="incomeNotes" rows="3" placeholder="Cliente, cantidad vendida, precio, forma de pago, etc."></textarea>
+              </label>
+              <div class="wide income-summary" id="incomeSummaryPreview">
+                <span id="eggIncomeLine">Venta de huevos <strong id="eggIncomePreview">$0</strong></span>
+                <span id="birdIncomeLine">Venta de gallinas <strong id="birdIncomePreview">$0</strong></span>
+                <span>Este ingreso <strong id="totalIncomePreview">$0</strong></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="entry-section entry-panel" data-entry-panel="expense">
+            <div class="entry-section-head">
+              <span class="entry-section-icon"><img src="factura.png" alt="" /></span>
+              <div>
+                <h2>Gastos</h2>
+                <p>Gastos diarios del grupo.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <label>
+                Gastos
+                <input type="text" id="dailyCost" inputmode="numeric" placeholder="$0" />
+              </label>
+              <label class="wide">
+                Notas de gastos
+                <textarea id="expenseNotes" rows="3" placeholder="Medicamento, reparación, compra chica, traslado, etc."></textarea>
+              </label>
+            </div>
+          </section>
+
+          <button id="saveEntryBtn" class="primary wide" type="submit">Guardar producción</button>
+        </form>
+      </section>
+
+      <section id="history" class="panel">
+        <div class="section-head">
+          <h2>Historial</h2>
+        </div>
+        <div class="history-tabs" id="historyTypeTabs" aria-label="Tipo de historial">
+          <button type="button" class="history-tab active" data-history-tab="production">Producción</button>
+          <button type="button" class="history-tab" data-history-tab="consumption">Consumo</button>
+          <button type="button" class="history-tab" data-history-tab="income">Ingresos</button>
+          <button type="button" class="history-tab" data-history-tab="expense">Gastos</button>
+        </div>
+        <div id="historyRows" class="history-list"></div>
+      </section>
+
+      <section id="stock" class="panel">
+        <div class="mini-summary stock-summary">
+          <span id="cornStock">Maíz disponible: 0 kg</span>
+          <span id="feedStock">Balanceado disponible: 0 kg</span>
+        </div>
+        <form id="stockForm" class="form-grid">
+          <label>
+            Fecha
+            <input type="date" id="stockDate" required />
+          </label>
+          <label>
+            Tipo
+            <select id="stockType">
+              <option value="Maiz">Maíz</option>
+              <option value="Balanceado">Balanceado</option>
+            </select>
+          </label>
+          <label>
+            Kilos comprados
+            <input type="number" id="stockKg" min="0" step="0.01" placeholder="0" />
+          </label>
+          <label>
+            Costo por kilo
+            <input type="text" id="stockCost" inputmode="numeric" placeholder="$0" />
+          </label>
+          <div class="wide income-summary stock-total">
+            <span>Total de la compra <strong id="stockTotalPreview">$0</strong></span>
+          </div>
+          <label class="wide">
+            Notas
+            <textarea id="stockNotes" rows="3" placeholder="Vendedor, porcentaje de proteína, marca, observaciones, etc."></textarea>
+          </label>
+          <button class="primary wide" type="submit">Agregar compra</button>
+        </form>
+        <div id="stockPurchases" class="event-list stock-purchases"></div>
+      </section>
+
+      <!-- Plantel + Sanidad unificados -->
+      <section id="flock" class="panel">
+        <!-- Sub-tabs: Plantel / Sanidad -->
+        <div class="flock-subtabs" id="flockSubtabs" role="tablist" aria-label="Sección">
+          <button type="button" class="flock-subtab active" data-flock-tab="plantel" role="tab">
+            <img src="gallina (1).png" alt="" />
+            <span>Plantel</span>
+          </button>
+          <button type="button" class="flock-subtab" data-flock-tab="sanidad" role="tab">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2a5 5 0 0 1 5 5c0 3-5 13-5 13S7 10 7 7a5 5 0 0 1 5-5Z"/>
+              <circle cx="12" cy="7" r="1.5" fill="currentColor" stroke="none"/>
+            </svg>
+            <span>Sanidad</span>
+          </button>
+        </div>
+
+        <!-- Plantel sub-panel -->
+        <div id="flockSubPanelPlantel" class="flock-subpanel active">
+          <div class="mini-summary stock-summary">
+            <span id="flockGallinas">Gallinas: 0</span>
+            <span id="flockPigmeas">Pigmeas: 0</span>
+          </div>
+          <form id="flockForm" class="form-grid">
+            <label>
+              Fecha
+              <input type="date" id="flockDate" required />
+            </label>
+            <label>
+              Grupo
+              <select id="flockGroup">
+                <option value="Gallinas">Gallinas</option>
+                <option value="Pigmeas">Pigmeas</option>
+              </select>
+            </label>
+            <label>
+              Movimiento
+              <select id="flockAction">
+                <option value="Compra">Compra</option>
+                <option value="Baja">Baja</option>
+                <option value="Ajuste">Ajuste manual</option>
+              </select>
+            </label>
+            <label>
+              Cantidad
+              <input type="number" id="flockQuantity" min="0" step="1" placeholder="0" />
+            </label>
+            <label class="wide">
+              Notas
+              <textarea id="flockNotes" rows="3" placeholder="Origen, causa de baja, traslado, observaciones, etc."></textarea>
+            </label>
+            <button class="primary wide" type="submit">Actualizar plantel</button>
+          </form>
+          <div id="flockEvents" class="event-list"></div>
+        </div>
+
+        <!-- Sanidad sub-panel -->
+        <div id="flockSubPanelSanidad" class="flock-subpanel">
+          <form id="healthForm" class="form-grid">
+            <label>
+              Fecha
+              <input type="date" id="healthDate" required />
+            </label>
+            <label>
+              Tipo de evento
+              <select id="healthType">
+                <option>Desparasitación</option>
+                <option>Enfermedad</option>
+                <option>Vacuna</option>
+                <option>Limpieza profunda</option>
+                <option>Otro</option>
+              </select>
+            </label>
+            <label>
+              Aves afectadas
+              <input type="number" id="affectedHens" min="0" step="1" placeholder="0" />
+            </label>
+            <label>
+              Costo
+              <input type="text" id="healthCost" inputmode="numeric" placeholder="$0" />
+            </label>
+            <label class="wide">
+              Detalle
+              <textarea id="healthNotes" rows="3" placeholder="Producto, dosis, síntomas, duración, veterinario, etc."></textarea>
+            </label>
+            <button class="primary wide" type="submit">Guardar evento sanitario</button>
+          </form>
+          <div id="healthList" class="event-list"></div>
+        </div>
+      </section>
+
+      <!-- Reportes (accesible desde el botón del topbar) -->
+      <section id="reports" class="panel">
+        <div class="backup-box">
+          <h2>Reportes y respaldo</h2>
+          <p>Exportá el Excel con todos los datos del gallinero, o creá un respaldo para restaurar en otro dispositivo.</p>
+          <div class="backup-actions">
+            <button id="exportExcelBtn" class="primary">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+              Exportar Excel
+            </button>
+            <button id="backupBtn" class="ghost">Crear respaldo</button>
+            <label class="import-label">
+              Importar respaldo
+              <input type="file" id="importBackup" accept="application/json" />
+            </label>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <button id="floatingAddBtn" class="floating-add" aria-label="Cargar día" title="Cargar día">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+    </button>
+
+    <!-- Nav: 5 tabs (Sanidad y Reportes ya no están aquí) -->
+    <nav class="tabs" aria-label="Secciones">
+      <button class="tab active" data-tab="home">
+        <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+        <span>Inicio</span>
+      </button>
+      <button class="tab" data-tab="daily">
+        <svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+        <span>Carga</span>
+      </button>
+      <button class="tab" data-tab="history">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+        <span>Historial</span>
+      </button>
+      <button class="tab" data-tab="stock">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M7 7v13h10V7"/><path d="M9 4h6l1 3H8l1-3Z"/></svg>
+        <span>Stock</span>
+      </button>
+      <button class="tab" data-tab="flock">
+        <img src="gallina (1).png" alt="" />
+        <span>Plantel</span>
+      </button>
+    </nav>
+
+    <div id="entryPreviewModal" class="modal-backdrop" hidden>
+      <article class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+        <div class="preview-modal-head">
+          <div>
+            <p id="previewMeta" class="preview-meta"></p>
+            <h2 id="previewTitle">Detalle</h2>
+          </div>
+          <button id="closePreviewBtn" class="icon-button" type="button" aria-label="Cerrar">
+            <svg viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div id="previewBody" class="preview-body"></div>
+        <div id="deleteConfirmBox" class="delete-confirm" hidden>
+          <strong>¿Eliminar esta entrada?</strong>
+          <span>Esta acción no se puede deshacer.</span>
+        </div>
+        <div class="preview-actions">
+          <button id="deletePreviewBtn" class="danger-button" type="button">Eliminar</button>
+          <button id="editPreviewBtn" class="primary" type="button">Editar</button>
+          <button id="cancelDeleteBtn" class="ghost" type="button" hidden>Cancelar</button>
+          <button id="confirmDeleteBtn" class="danger-solid" type="button" hidden>Confirmar eliminación</button>
+        </div>
+      </article>
+    </div>
+
+    <div id="stockAlertModal" class="modal-backdrop" hidden>
+      <article class="stock-alert-modal" role="dialog" aria-modal="true" aria-labelledby="stockAlertTitle">
+        <div class="entry-section-head">
+          <span class="entry-section-icon"><img src="maiz.png" alt="" /></span>
+          <div>
+            <p class="preview-meta">Stock bajo</p>
+            <h2 id="stockAlertTitle">Queda poco alimento</h2>
+          </div>
+        </div>
+        <p id="stockAlertText"></p>
+        <button id="closeStockAlertBtn" class="primary wide" type="button">Aceptar</button>
+      </article>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
