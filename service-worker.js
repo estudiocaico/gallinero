@@ -1,4 +1,4 @@
-const CACHE_NAME = "gallinero-control-v32";
+const CACHE_NAME = "gallinero-control-v35";
 const FILES = [
   "./",
   "./index.html",

@@ -45,6 +45,8 @@ let editingEntryId = null;
 let lowStockAlertShown = false;
 let supabaseClient = null;
 let isApplyingRemoteState = false;
+let lastSyncedState = structuredClone(state);
+let hasSyncedOnce = false;
 
 function uid() {
   return `entry-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -167,6 +169,95 @@ function getSupabaseClient() {
   return supabaseClient;
 }
 
+function sameStatePart(a, b) {
+  return JSON.stringify(a || null) === JSON.stringify(b || null);
+}
+
+function syncEntryKey(entry) {
+  return isIncomeEntry(entry) ? `income:${entry.id}` : `main:${entry.date}:${flockOf(entry)}`;
+}
+
+function mergeNumberDelta(baseEntry, remoteEntry, localEntry, field) {
+  return number(baseEntry?.[field]) + (number(remoteEntry?.[field]) - number(baseEntry?.[field])) + (number(localEntry?.[field]) - number(baseEntry?.[field]));
+}
+
+function mergeMainEntry(baseEntry = {}, remoteEntry = {}, localEntry = {}) {
+  const merged = { ...remoteEntry, ...localEntry };
+  ["morningEggs", "afternoonEggs", "lostEggs", "cornKg", "feedKg", "waterLiters", "dailyCost"].forEach((field) => {
+    const remoteChanged = number(remoteEntry[field]) !== number(baseEntry[field]);
+    const localChanged = number(localEntry[field]) !== number(baseEntry[field]);
+    if (remoteChanged && localChanged) merged[field] = mergeNumberDelta(baseEntry, remoteEntry, localEntry, field);
+    else if (remoteChanged) merged[field] = number(remoteEntry[field]);
+    else if (localChanged) merged[field] = number(localEntry[field]);
+  });
+  merged.updatedSections = {
+    ...(remoteEntry.updatedSections || {}),
+    ...(localEntry.updatedSections || {}),
+  };
+  ["productionNotes", "consumptionNotes", "expenseNotes"].forEach((field) => {
+    const remoteNote = remoteEntry[field] || "";
+    const localNote = localEntry[field] || "";
+    const baseNote = baseEntry[field] || "";
+    if (remoteNote !== baseNote && localNote !== baseNote && remoteNote && localNote && remoteNote !== localNote) {
+      merged[field] = `${remoteNote}\n${localNote}`;
+    }
+  });
+  return merged;
+}
+
+function mergeUniqueArray(remoteItems = [], localItems = []) {
+  const map = new Map();
+  [...remoteItems, ...localItems].forEach((item) => {
+    const key = item.id || JSON.stringify(item);
+    map.set(key, item);
+  });
+  return [...map.values()];
+}
+
+function mergeStateForSync(remoteRaw, localRaw, baseRaw) {
+  const remote = migrateState(remoteRaw || structuredClone(initialState));
+  const local = migrateState(localRaw || structuredClone(initialState));
+  const base = migrateState(baseRaw || structuredClone(initialState));
+  const merged = structuredClone(remote);
+  const remoteEntries = new Map(remote.daily.map((entry) => [syncEntryKey(entry), entry]));
+  const baseEntries = new Map(base.daily.map((entry) => [syncEntryKey(entry), entry]));
+  const localEntries = new Map(local.daily.map((entry) => [syncEntryKey(entry), entry]));
+
+  local.daily.forEach((localEntry) => {
+    const key = syncEntryKey(localEntry);
+    const baseEntry = baseEntries.get(key);
+    const remoteEntry = remoteEntries.get(key);
+    const localChanged = !sameStatePart(localEntry, baseEntry);
+    if (!localChanged) return;
+    if (!remoteEntry || isIncomeEntry(localEntry)) {
+      remoteEntries.set(key, localEntry);
+      return;
+    }
+    if (!baseEntry) {
+      remoteEntries.set(key, mergeMainEntry(emptyEntry(localEntry.date, flockOf(localEntry)), remoteEntry, localEntry));
+      return;
+    }
+    const remoteChanged = !sameStatePart(remoteEntry, baseEntry);
+    remoteEntries.set(key, remoteChanged ? mergeMainEntry(baseEntry, remoteEntry, localEntry) : localEntry);
+  });
+
+  remote.daily.forEach((remoteEntry) => {
+    const key = syncEntryKey(remoteEntry);
+    if (localEntries.has(key)) return;
+    const baseEntry = baseEntries.get(key);
+    const remoteChanged = !sameStatePart(remoteEntry, baseEntry);
+    if (remoteChanged) remoteEntries.set(key, remoteEntry);
+  });
+
+  merged.daily = [...remoteEntries.values()];
+  merged.stock = mergeUniqueArray(remote.stock, local.stock);
+  merged.health = mergeUniqueArray(remote.health, local.health);
+  merged.flockEvents = mergeUniqueArray(remote.flockEvents, local.flockEvents);
+  merged.flocks = { ...remote.flocks, ...local.flocks };
+  merged.hens = merged.flocks.Gallinas;
+  return migrateState(merged);
+}
+
 async function loadStateFromSupabase() {
   const client = getSupabaseClient();
   if (!client) return;
@@ -184,10 +275,15 @@ async function loadStateFromSupabase() {
     return;
   }
   isApplyingRemoteState = true;
-  state = migrateState(data.data);
+  const localSnapshot = structuredClone(state);
+  state = mergeStateForSync(data.data, localSnapshot, lastSyncedState);
+  const shouldUploadMergedState = !sameStatePart(state, data.data);
+  lastSyncedState = structuredClone(state);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   render();
   isApplyingRemoteState = false;
+  hasSyncedOnce = true;
+  if (shouldUploadMergedState) await syncStateToSupabase({ silent: true });
   showToast("Datos sincronizados");
 }
 
@@ -195,11 +291,26 @@ async function syncStateToSupabase(options = {}) {
   if (isApplyingRemoteState) return;
   const client = getSupabaseClient();
   if (!client) return;
+  const localSnapshot = structuredClone(state);
+  const { data } = await client
+    .from("gallinero_state")
+    .select("data")
+    .eq("id", supabaseSettings().rowId)
+    .maybeSingle();
+  if (data?.data) {
+    state = mergeStateForSync(data.data, localSnapshot, lastSyncedState);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    render();
+  }
   const { error } = await client.from("gallinero_state").upsert({
     id: supabaseSettings().rowId,
     data: state,
     updated_at: new Date().toISOString(),
   });
+  if (!error) {
+    lastSyncedState = structuredClone(state);
+    hasSyncedOnce = true;
+  }
   if (error && !options.silent) showToast("Guardado local, sin sincronizar");
 }
 
@@ -1656,6 +1767,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // ────────────────────────────────────────────────────────────────────────
 
     const previous = currentFormEntry();
+    const isEditingMainEntry = Boolean(editingEntryId && previous?.id === editingEntryId);
+    const previousAmount = (field) => (isEditingMainEntry ? 0 : number(previous?.[field]));
+    const combineNotes = (oldNote, newNote) => {
+      if (isEditingMainEntry) return newNote;
+      if (!oldNote) return newNote;
+      if (!newNote) return oldNote;
+      return `${oldNote}\n${newNote}`;
+    };
     const entry = {
       ...emptyEntry($("#date").value, selectedDailyFlock),
       ...(previous || {}),
@@ -1663,23 +1782,23 @@ document.addEventListener("DOMContentLoaded", () => {
       flock: selectedDailyFlock,
     };
     if (activeEntryTab === "production") {
-      entry.morningEggs = number($("#morningEggs").value);
-      entry.afternoonEggs = number($("#afternoonEggs").value);
-      entry.lostEggs = number($("#lostEggs").value);
-      entry.productionNotes = $("#productionNotes").value.trim();
+      entry.morningEggs = previousAmount("morningEggs") + number($("#morningEggs").value);
+      entry.afternoonEggs = previousAmount("afternoonEggs") + number($("#afternoonEggs").value);
+      entry.lostEggs = previousAmount("lostEggs") + number($("#lostEggs").value);
+      entry.productionNotes = combineNotes(previous?.productionNotes, $("#productionNotes").value.trim());
       entry.hensAfter = state.flocks[entry.flock];
     }
 
     if (activeEntryTab === "consumption") {
-      entry.cornKg = number($("#cornKg").value);
-      entry.feedKg = number($("#feedKg").value);
-      entry.waterLiters = number($("#waterLiters").value);
-      entry.consumptionNotes = $("#consumptionNotes").value.trim();
+      entry.cornKg = previousAmount("cornKg") + number($("#cornKg").value);
+      entry.feedKg = previousAmount("feedKg") + number($("#feedKg").value);
+      entry.waterLiters = previousAmount("waterLiters") + number($("#waterLiters").value);
+      entry.consumptionNotes = combineNotes(previous?.consumptionNotes, $("#consumptionNotes").value.trim());
     }
 
     if (activeEntryTab === "expense") {
-      entry.dailyCost = parseMoney($("#dailyCost").value);
-      entry.expenseNotes = $("#expenseNotes").value.trim();
+      entry.dailyCost = previousAmount("dailyCost") + parseMoney($("#dailyCost").value);
+      entry.expenseNotes = combineNotes(previous?.expenseNotes, $("#expenseNotes").value.trim());
     }
 
     const hasSavedData = sectionHasData(entry, activeEntryTab);
@@ -1693,6 +1812,7 @@ document.addEventListener("DOMContentLoaded", () => {
     selectedYear = Number(entry.date.slice(0, 4));
     selectedMonth = Number(entry.date.slice(5, 7)) - 1;
     saveState("Guardado");
+    editingEntryId = null;
     resetDailyFormForNextEntry();
     setActiveTab("home");
   });
@@ -1841,6 +1961,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       const entry = getEntry(date, flock);
       closeEntryPreview();
+      editingEntryId = entry?.id || null;
       fillDailyForm(entry);
       setActiveTab("daily");
       setEntryTab(editTab);
