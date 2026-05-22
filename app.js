@@ -184,13 +184,17 @@ function mergeNumberDelta(baseEntry, remoteEntry, localEntry, field) {
 }
 
 function mergeMainEntry(baseEntry = {}, remoteEntry = {}, localEntry = {}) {
-  const merged = { ...remoteEntry, ...localEntry };
+  // Merge: local always overwrites remote for fields the local changed.
+  // If only remote changed a field (e.g., another device), keep remote value.
+  // Never sum numeric fields — always use replacement semantics.
+  const merged = { ...remoteEntry };
   ["morningEggs", "afternoonEggs", "lostEggs", "cornKg", "feedKg", "waterLiters", "dailyCost"].forEach((field) => {
     const remoteChanged = number(remoteEntry[field]) !== number(baseEntry[field]);
     const localChanged = number(localEntry[field]) !== number(baseEntry[field]);
-    if (remoteChanged && localChanged) merged[field] = mergeNumberDelta(baseEntry, remoteEntry, localEntry, field);
-    else if (remoteChanged) merged[field] = number(remoteEntry[field]);
-    else if (localChanged) merged[field] = number(localEntry[field]);
+    if (localChanged || remoteChanged) {
+      // Prefer local value when local changed; otherwise keep remote
+      merged[field] = localChanged ? number(localEntry[field]) : number(remoteEntry[field]);
+    }
   });
   merged.updatedSections = {
     ...(remoteEntry.updatedSections || {}),
@@ -200,8 +204,10 @@ function mergeMainEntry(baseEntry = {}, remoteEntry = {}, localEntry = {}) {
     const remoteNote = remoteEntry[field] || "";
     const localNote = localEntry[field] || "";
     const baseNote = baseEntry[field] || "";
-    if (remoteNote !== baseNote && localNote !== baseNote && remoteNote && localNote && remoteNote !== localNote) {
-      merged[field] = `${remoteNote}\n${localNote}`;
+    if (localNote !== baseNote) {
+      merged[field] = localNote;
+    } else if (remoteNote !== baseNote) {
+      merged[field] = remoteNote;
     }
   });
   return merged;
@@ -1843,59 +1849,31 @@ document.addEventListener("DOMContentLoaded", () => {
     // ────────────────────────────────────────────────────────────────────────
 
     const previous = currentFormEntry();
-    const isEditingMainEntry = Boolean(editingEntryId && previous?.id === editingEntryId);
-    const previousAmount = (field) => (isEditingMainEntry ? 0 : number(previous?.[field]));
-    const combineNotes = (oldNote, newNote) => {
-      if (isEditingMainEntry) return newNote;
-      if (!oldNote) return newNote;
-      if (!newNote) return oldNote;
-      return `${oldNote}\n${newNote}`;
-    };
+    // Always replace values (never accumulate) — prevents double-counting on re-saves
     const entry = {
       ...emptyEntry($("#date").value, selectedDailyFlock),
       ...(previous || {}),
       date: $("#date").value,
       flock: selectedDailyFlock,
     };
-    const dailyDelta = {
-      date: entry.date,
-      flock: entry.flock,
-      tab: activeEntryTab,
-      values: {},
-      notes: {},
-    };
     if (activeEntryTab === "production") {
-      dailyDelta.values = {
-        morningEggs: number($("#morningEggs").value),
-        afternoonEggs: number($("#afternoonEggs").value),
-        lostEggs: number($("#lostEggs").value),
-      };
-      dailyDelta.notes = { productionNotes: $("#productionNotes").value.trim() };
-      entry.morningEggs = previousAmount("morningEggs") + dailyDelta.values.morningEggs;
-      entry.afternoonEggs = previousAmount("afternoonEggs") + dailyDelta.values.afternoonEggs;
-      entry.lostEggs = previousAmount("lostEggs") + dailyDelta.values.lostEggs;
-      entry.productionNotes = combineNotes(previous?.productionNotes, dailyDelta.notes.productionNotes);
+      entry.morningEggs = number($("#morningEggs").value);
+      entry.afternoonEggs = number($("#afternoonEggs").value);
+      entry.lostEggs = number($("#lostEggs").value);
+      entry.productionNotes = $("#productionNotes").value.trim();
       entry.hensAfter = state.flocks[entry.flock];
     }
 
     if (activeEntryTab === "consumption") {
-      dailyDelta.values = {
-        cornKg: number($("#cornKg").value),
-        feedKg: number($("#feedKg").value),
-        waterLiters: number($("#waterLiters").value),
-      };
-      dailyDelta.notes = { consumptionNotes: $("#consumptionNotes").value.trim() };
-      entry.cornKg = previousAmount("cornKg") + dailyDelta.values.cornKg;
-      entry.feedKg = previousAmount("feedKg") + dailyDelta.values.feedKg;
-      entry.waterLiters = previousAmount("waterLiters") + dailyDelta.values.waterLiters;
-      entry.consumptionNotes = combineNotes(previous?.consumptionNotes, dailyDelta.notes.consumptionNotes);
+      entry.cornKg = number($("#cornKg").value);
+      entry.feedKg = number($("#feedKg").value);
+      entry.waterLiters = number($("#waterLiters").value);
+      entry.consumptionNotes = $("#consumptionNotes").value.trim();
     }
 
     if (activeEntryTab === "expense") {
-      dailyDelta.values = { dailyCost: parseMoney($("#dailyCost").value) };
-      dailyDelta.notes = { expenseNotes: $("#expenseNotes").value.trim() };
-      entry.dailyCost = previousAmount("dailyCost") + dailyDelta.values.dailyCost;
-      entry.expenseNotes = combineNotes(previous?.expenseNotes, dailyDelta.notes.expenseNotes);
+      entry.dailyCost = parseMoney($("#dailyCost").value);
+      entry.expenseNotes = $("#expenseNotes").value.trim();
     }
 
     const hasSavedData = sectionHasData(entry, activeEntryTab);
@@ -1912,9 +1890,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     render();
     showToast("Guardado");
-    if (isEditingMainEntry || !(await syncDailyDeltaToSupabase(dailyDelta))) {
-      syncStateToSupabase();
-    }
+    syncStateToSupabase();
     editingEntryId = null;
     resetDailyFormForNextEntry();
     setActiveTab("home");
@@ -2009,14 +1985,20 @@ document.addEventListener("DOMContentLoaded", () => {
     openStockPreview(Number(item.dataset.stockIndex));
   });
 
-  $("#addTodayBtn").addEventListener("click", () => {
-    resetDailyFormForNextEntry();
+  function openDailyFormForToday() {
+    const existing = getEntry(today(), selectedDailyFlock);
+    if (existing) {
+      // Pre-fill with existing entry so user edits in-place (not accumulates)
+      editingEntryId = existing.id;
+      fillDailyForm(existing);
+    } else {
+      editingEntryId = null;
+      fillDailyForm({ date: today(), flock: selectedDailyFlock });
+    }
     setActiveTab("daily");
-  });
-  $("#floatingAddBtn").addEventListener("click", () => {
-    resetDailyFormForNextEntry();
-    setActiveTab("daily");
-  });
+  }
+  $("#addTodayBtn").addEventListener("click", openDailyFormForToday);
+  $("#floatingAddBtn").addEventListener("click", openDailyFormForToday);
   // Reports button in topbar
   $("#openReportsBtn").addEventListener("click", () => setActiveTab("reports"));
 

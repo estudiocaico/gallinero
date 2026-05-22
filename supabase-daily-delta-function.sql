@@ -19,7 +19,6 @@ declare
   v_item jsonb;
   v_field text;
   v_note_field text;
-  v_old_note text;
   v_new_note text;
   v_sections jsonb;
 begin
@@ -75,10 +74,11 @@ begin
 
   foreach v_field in array array['morningEggs', 'afternoonEggs', 'lostEggs', 'cornKg', 'feedKg', 'waterLiters', 'dailyCost'] loop
     if p_delta ? v_field then
+      -- SET the value (replace, not accumulate) to avoid double-counting
       v_entry := jsonb_set(
         v_entry,
         array[v_field],
-        to_jsonb(coalesce((v_entry->>v_field)::numeric, 0) + coalesce((p_delta->>v_field)::numeric, 0)),
+        to_jsonb(coalesce((p_delta->>v_field)::numeric, 0)),
         true
       );
     end if;
@@ -86,15 +86,9 @@ begin
 
   foreach v_note_field in array array['productionNotes', 'consumptionNotes', 'expenseNotes'] loop
     if p_notes ? v_note_field then
+      -- Replace note (not concatenate) to match replacement semantics in JS
       v_new_note := trim(coalesce(p_notes->>v_note_field, ''));
-      if v_new_note <> '' then
-        v_old_note := coalesce(v_entry->>v_note_field, '');
-        if v_old_note = '' then
-          v_entry := jsonb_set(v_entry, array[v_note_field], to_jsonb(v_new_note), true);
-        else
-          v_entry := jsonb_set(v_entry, array[v_note_field], to_jsonb(v_old_note || E'\n' || v_new_note), true);
-        end if;
-      end if;
+      v_entry := jsonb_set(v_entry, array[v_note_field], to_jsonb(v_new_note), true);
     end if;
   end loop;
 
