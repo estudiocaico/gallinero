@@ -216,6 +216,28 @@ function mergeUniqueArray(remoteItems = [], localItems = []) {
   return [...map.values()];
 }
 
+async function syncDailyDeltaToSupabase(delta) {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { data, error } = await client.rpc("gallinero_add_daily_delta", {
+    p_row_id: supabaseSettings().rowId,
+    p_date: delta.date,
+    p_flock: delta.flock,
+    p_tab: delta.tab,
+    p_delta: delta.values,
+    p_notes: delta.notes,
+  });
+  if (error || !data) return false;
+  isApplyingRemoteState = true;
+  state = migrateState(data);
+  lastSyncedState = structuredClone(state);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  render();
+  isApplyingRemoteState = false;
+  hasSyncedOnce = true;
+  return true;
+}
+
 function mergeStateForSync(remoteRaw, localRaw, baseRaw) {
   const remote = migrateState(remoteRaw || structuredClone(initialState));
   const local = migrateState(localRaw || structuredClone(initialState));
@@ -1774,7 +1796,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  $("#dailyForm").addEventListener("submit", (event) => {
+  $("#dailyForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
     // ── Independent income entries ──────────────────────────────────────────
@@ -1835,24 +1857,45 @@ document.addEventListener("DOMContentLoaded", () => {
       date: $("#date").value,
       flock: selectedDailyFlock,
     };
+    const dailyDelta = {
+      date: entry.date,
+      flock: entry.flock,
+      tab: activeEntryTab,
+      values: {},
+      notes: {},
+    };
     if (activeEntryTab === "production") {
-      entry.morningEggs = previousAmount("morningEggs") + number($("#morningEggs").value);
-      entry.afternoonEggs = previousAmount("afternoonEggs") + number($("#afternoonEggs").value);
-      entry.lostEggs = previousAmount("lostEggs") + number($("#lostEggs").value);
-      entry.productionNotes = combineNotes(previous?.productionNotes, $("#productionNotes").value.trim());
+      dailyDelta.values = {
+        morningEggs: number($("#morningEggs").value),
+        afternoonEggs: number($("#afternoonEggs").value),
+        lostEggs: number($("#lostEggs").value),
+      };
+      dailyDelta.notes = { productionNotes: $("#productionNotes").value.trim() };
+      entry.morningEggs = previousAmount("morningEggs") + dailyDelta.values.morningEggs;
+      entry.afternoonEggs = previousAmount("afternoonEggs") + dailyDelta.values.afternoonEggs;
+      entry.lostEggs = previousAmount("lostEggs") + dailyDelta.values.lostEggs;
+      entry.productionNotes = combineNotes(previous?.productionNotes, dailyDelta.notes.productionNotes);
       entry.hensAfter = state.flocks[entry.flock];
     }
 
     if (activeEntryTab === "consumption") {
-      entry.cornKg = previousAmount("cornKg") + number($("#cornKg").value);
-      entry.feedKg = previousAmount("feedKg") + number($("#feedKg").value);
-      entry.waterLiters = previousAmount("waterLiters") + number($("#waterLiters").value);
-      entry.consumptionNotes = combineNotes(previous?.consumptionNotes, $("#consumptionNotes").value.trim());
+      dailyDelta.values = {
+        cornKg: number($("#cornKg").value),
+        feedKg: number($("#feedKg").value),
+        waterLiters: number($("#waterLiters").value),
+      };
+      dailyDelta.notes = { consumptionNotes: $("#consumptionNotes").value.trim() };
+      entry.cornKg = previousAmount("cornKg") + dailyDelta.values.cornKg;
+      entry.feedKg = previousAmount("feedKg") + dailyDelta.values.feedKg;
+      entry.waterLiters = previousAmount("waterLiters") + dailyDelta.values.waterLiters;
+      entry.consumptionNotes = combineNotes(previous?.consumptionNotes, dailyDelta.notes.consumptionNotes);
     }
 
     if (activeEntryTab === "expense") {
-      entry.dailyCost = previousAmount("dailyCost") + parseMoney($("#dailyCost").value);
-      entry.expenseNotes = combineNotes(previous?.expenseNotes, $("#expenseNotes").value.trim());
+      dailyDelta.values = { dailyCost: parseMoney($("#dailyCost").value) };
+      dailyDelta.notes = { expenseNotes: $("#expenseNotes").value.trim() };
+      entry.dailyCost = previousAmount("dailyCost") + dailyDelta.values.dailyCost;
+      entry.expenseNotes = combineNotes(previous?.expenseNotes, dailyDelta.notes.expenseNotes);
     }
 
     const hasSavedData = sectionHasData(entry, activeEntryTab);
@@ -1865,7 +1908,13 @@ document.addEventListener("DOMContentLoaded", () => {
     upsertDaily(entry);
     selectedYear = Number(entry.date.slice(0, 4));
     selectedMonth = Number(entry.date.slice(5, 7)) - 1;
-    saveState("Guardado");
+    state.hens = state.flocks.Gallinas;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    render();
+    showToast("Guardado");
+    if (isEditingMainEntry || !(await syncDailyDeltaToSupabase(dailyDelta))) {
+      syncStateToSupabase();
+    }
     editingEntryId = null;
     resetDailyFormForNextEntry();
     setActiveTab("home");
