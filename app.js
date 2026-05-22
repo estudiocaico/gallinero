@@ -47,6 +47,8 @@ let supabaseClient = null;
 let isApplyingRemoteState = false;
 let lastSyncedState = structuredClone(state);
 let hasSyncedOnce = false;
+let isSyncingToSupabase = false;
+let pendingSupabaseSync = false;
 
 function uid() {
   return `entry-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -263,7 +265,7 @@ async function loadStateFromSupabase() {
   if (!client) return;
   const { data, error } = await client
     .from("gallinero_state")
-    .select("data")
+    .select("data, updated_at")
     .eq("id", supabaseSettings().rowId)
     .maybeSingle();
   if (error) {
@@ -291,27 +293,79 @@ async function syncStateToSupabase(options = {}) {
   if (isApplyingRemoteState) return;
   const client = getSupabaseClient();
   if (!client) return;
-  const localSnapshot = structuredClone(state);
-  const { data } = await client
-    .from("gallinero_state")
-    .select("data")
-    .eq("id", supabaseSettings().rowId)
-    .maybeSingle();
-  if (data?.data) {
-    state = mergeStateForSync(data.data, localSnapshot, lastSyncedState);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    render();
+  if (isSyncingToSupabase) {
+    pendingSupabaseSync = true;
+    return;
   }
-  const { error } = await client.from("gallinero_state").upsert({
-    id: supabaseSettings().rowId,
-    data: state,
-    updated_at: new Date().toISOString(),
-  });
-  if (!error) {
-    lastSyncedState = structuredClone(state);
-    hasSyncedOnce = true;
+  isSyncingToSupabase = true;
+  let error = null;
+  const localSnapshot = structuredClone(state);
+  let desiredState = structuredClone(localSnapshot);
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { data: remoteRow, error: readError } = await client
+        .from("gallinero_state")
+        .select("data, updated_at")
+        .eq("id", supabaseSettings().rowId)
+        .maybeSingle();
+      if (readError) {
+        error = readError;
+        break;
+      }
+
+      if (remoteRow?.data) {
+        desiredState = mergeStateForSync(remoteRow.data, localSnapshot, lastSyncedState);
+      } else {
+        desiredState = structuredClone(localSnapshot);
+      }
+
+      const nextUpdatedAt = new Date().toISOString();
+      if (!remoteRow) {
+        const { error: insertError } = await client.from("gallinero_state").insert({
+          id: supabaseSettings().rowId,
+          data: desiredState,
+          updated_at: nextUpdatedAt,
+        });
+        if (!insertError) {
+          error = null;
+          break;
+        }
+        error = insertError;
+        continue;
+      }
+
+      const { data: updatedRow, error: updateError } = await client
+        .from("gallinero_state")
+        .update({
+          data: desiredState,
+          updated_at: nextUpdatedAt,
+        })
+        .eq("id", supabaseSettings().rowId)
+        .eq("updated_at", remoteRow.updated_at)
+        .select("updated_at")
+        .maybeSingle();
+      if (!updateError && updatedRow) {
+        error = null;
+        break;
+      }
+      error = updateError || new Error("La nube cambio durante el guardado");
+    }
+
+    if (!error) {
+      state = migrateState(desiredState);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      render();
+      lastSyncedState = structuredClone(state);
+      hasSyncedOnce = true;
+    }
+  } finally {
+    isSyncingToSupabase = false;
   }
   if (error && !options.silent) showToast("Guardado local, sin sincronizar");
+  if (pendingSupabaseSync) {
+    pendingSupabaseSync = false;
+    syncStateToSupabase({ silent: options.silent });
+  }
 }
 
 function showToast(message) {
