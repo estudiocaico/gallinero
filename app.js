@@ -276,8 +276,12 @@ function mergeStateForSync(remoteRaw, localRaw, baseRaw) {
     const key = syncEntryKey(remoteEntry);
     if (localEntries.has(key)) return;
     const baseEntry = baseEntries.get(key);
-    const remoteChanged = !sameStatePart(remoteEntry, baseEntry);
-    if (remoteChanged) remoteEntries.set(key, remoteEntry);
+    if (baseEntry) {
+      // Entry was in base AND in remote but local deleted it → trust the deletion, don't re-add
+      return;
+    }
+    // Entry is new on remote (wasn't in base at all) → add it locally
+    remoteEntries.set(key, remoteEntry);
   });
 
   merged.daily = [...remoteEntries.values()];
@@ -474,9 +478,20 @@ function getEntry(date, flock = selectedDailyFlock) {
 }
 
 function upsertDaily(entry) {
-  const index = entry.id
-    ? state.daily.findIndex((item) => item.id === entry.id)
-    : state.daily.findIndex((item) => item.date === entry.date && flockOf(item) === entry.flock && item.entryType === entry.entryType);
+  let index = -1;
+  if (isIncomeEntry(entry)) {
+    // Income entries are individual records — find strictly by ID
+    index = entry.id ? state.daily.findIndex((item) => item.id === entry.id) : -1;
+  } else {
+    // Main entries: one per date+flock. First try by ID, then fall back to date+flock
+    // to avoid duplicates when IDs differ (e.g. between devices or after migration)
+    if (entry.id) {
+      index = state.daily.findIndex((item) => item.id === entry.id);
+    }
+    if (index < 0) {
+      index = state.daily.findIndex((item) => !isIncomeEntry(item) && item.date === entry.date && flockOf(item) === entry.flock);
+    }
+  }
   if (index >= 0) state.daily[index] = entry;
   else state.daily.push(entry);
 }
