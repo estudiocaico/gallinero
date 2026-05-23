@@ -1,4 +1,3 @@
-const STORAGE_KEY = "gallinero-control-v1";
 const FLOCKS = ["Gallinas", "Pigmeas"];
 const initialState = {
   hens: 183,
@@ -32,7 +31,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const number = (value) => Number(value || 0);
 const monthKey = (year, month) => `${year}-${String(month + 1).padStart(2, "0")}`;
 
-let state = loadState();
+let state = structuredClone(initialState);
 let selectedMonth = new Date().getMonth();
 let selectedYear = new Date().getFullYear();
 let selectedDailyFlock = "Gallinas";
@@ -45,11 +44,7 @@ let previewSelection = null;
 let editingEntryId = null;
 let lowStockAlertShown = false;
 let supabaseClient = null;
-let isApplyingRemoteState = false;
-let lastSyncedState = structuredClone(state);
-let hasSyncedOnce = false;
-let isSyncingToSupabase = false;
-let pendingSupabaseSync = false;
+let isSaving = false;
 
 function uid() {
   return `entry-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -66,16 +61,6 @@ function getIncomeEntries(date, flock) {
   );
 }
 // ──────────────────────────────────────────────────────────────────────────
-
-function loadState() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return structuredClone(initialState);
-  try {
-    return migrateState(JSON.parse(saved));
-  } catch {
-    return structuredClone(initialState);
-  }
-}
 
 function migrateState(saved) {
   const next = { ...structuredClone(initialState), ...saved };
@@ -148,10 +133,9 @@ function migrateState(saved) {
 
 function saveState(message = "Guardado") {
   state.hens = state.flocks.Gallinas;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   render();
   showToast(message);
-  syncStateToSupabase();
+  saveToSupabase();
 }
 
 function supabaseSettings() {
@@ -172,234 +156,39 @@ function getSupabaseClient() {
   return supabaseClient;
 }
 
-function sameStatePart(a, b) {
-  return JSON.stringify(a || null) === JSON.stringify(b || null);
-}
-
-function syncEntryKey(entry) {
-  return isIncomeEntry(entry) ? `income:${entry.id}` : `main:${entry.date}:${flockOf(entry)}`;
-}
-
-function mergeNumberDelta(baseEntry, remoteEntry, localEntry, field) {
-  return number(baseEntry?.[field]) + (number(remoteEntry?.[field]) - number(baseEntry?.[field])) + (number(localEntry?.[field]) - number(baseEntry?.[field]));
-}
-
-function mergeMainEntry(baseEntry = {}, remoteEntry = {}, localEntry = {}) {
-  // Merge: local always overwrites remote for fields the local changed.
-  // If only remote changed a field (e.g., another device), keep remote value.
-  // Never sum numeric fields — always use replacement semantics.
-  const merged = { ...remoteEntry };
-  ["morningEggs", "afternoonEggs", "lostEggs", "cornKg", "feedKg", "waterLiters", "dailyCost"].forEach((field) => {
-    const remoteChanged = number(remoteEntry[field]) !== number(baseEntry[field]);
-    const localChanged = number(localEntry[field]) !== number(baseEntry[field]);
-    if (localChanged || remoteChanged) {
-      // Prefer local value when local changed; otherwise keep remote
-      merged[field] = localChanged ? number(localEntry[field]) : number(remoteEntry[field]);
-    }
-  });
-  merged.updatedSections = {
-    ...(remoteEntry.updatedSections || {}),
-    ...(localEntry.updatedSections || {}),
-  };
-  ["productionNotes", "consumptionNotes", "expenseNotes"].forEach((field) => {
-    const remoteNote = remoteEntry[field] || "";
-    const localNote = localEntry[field] || "";
-    const baseNote = baseEntry[field] || "";
-    if (localNote !== baseNote) {
-      merged[field] = localNote;
-    } else if (remoteNote !== baseNote) {
-      merged[field] = remoteNote;
-    }
-  });
-  return merged;
-}
-
-function mergeUniqueArray(remoteItems = [], localItems = []) {
-  const map = new Map();
-  [...remoteItems, ...localItems].forEach((item) => {
-    const key = item.id || JSON.stringify(item);
-    map.set(key, item);
-  });
-  return [...map.values()];
-}
-
-async function syncDailyDeltaToSupabase(delta) {
-  const client = getSupabaseClient();
-  if (!client) return false;
-  const { data, error } = await client.rpc("gallinero_add_daily_delta", {
-    p_row_id: supabaseSettings().rowId,
-    p_date: delta.date,
-    p_flock: delta.flock,
-    p_tab: delta.tab,
-    p_delta: delta.values,
-    p_notes: delta.notes,
-  });
-  if (error || !data) return false;
-  isApplyingRemoteState = true;
-  state = migrateState(data);
-  lastSyncedState = structuredClone(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  render();
-  isApplyingRemoteState = false;
-  hasSyncedOnce = true;
-  return true;
-}
-
-function mergeStateForSync(remoteRaw, localRaw, baseRaw) {
-  const remote = migrateState(remoteRaw || structuredClone(initialState));
-  const local = migrateState(localRaw || structuredClone(initialState));
-  const base = migrateState(baseRaw || structuredClone(initialState));
-  const merged = structuredClone(remote);
-  const remoteEntries = new Map(remote.daily.map((entry) => [syncEntryKey(entry), entry]));
-  const baseEntries = new Map(base.daily.map((entry) => [syncEntryKey(entry), entry]));
-  const localEntries = new Map(local.daily.map((entry) => [syncEntryKey(entry), entry]));
-
-  local.daily.forEach((localEntry) => {
-    const key = syncEntryKey(localEntry);
-    const baseEntry = baseEntries.get(key);
-    const remoteEntry = remoteEntries.get(key);
-    const localChanged = !sameStatePart(localEntry, baseEntry);
-    if (!localChanged) return;
-    if (!remoteEntry || isIncomeEntry(localEntry)) {
-      remoteEntries.set(key, localEntry);
-      return;
-    }
-    if (!baseEntry) {
-      remoteEntries.set(key, mergeMainEntry(emptyEntry(localEntry.date, flockOf(localEntry)), remoteEntry, localEntry));
-      return;
-    }
-    const remoteChanged = !sameStatePart(remoteEntry, baseEntry);
-    remoteEntries.set(key, remoteChanged ? mergeMainEntry(baseEntry, remoteEntry, localEntry) : localEntry);
-  });
-
-  remote.daily.forEach((remoteEntry) => {
-    const key = syncEntryKey(remoteEntry);
-    if (localEntries.has(key)) return;
-    const baseEntry = baseEntries.get(key);
-    if (baseEntry) {
-      // Entry existed in base, local deleted it → trust the deletion.
-      // Must explicitly remove it from the map (it was pre-loaded during initialization).
-      remoteEntries.delete(key);
-      return;
-    }
-    // Entry is brand-new on remote (not in base) → keep it (already in map from init)
-  });
-
-  merged.daily = [...remoteEntries.values()];
-  merged.stock = mergeUniqueArray(remote.stock, local.stock);
-  merged.health = mergeUniqueArray(remote.health, local.health);
-  merged.flockEvents = mergeUniqueArray(remote.flockEvents, local.flockEvents);
-  merged.flocks = { ...remote.flocks, ...local.flocks };
-  merged.hens = merged.flocks.Gallinas;
-  return migrateState(merged);
-}
-
 async function loadStateFromSupabase() {
   const client = getSupabaseClient();
-  if (!client) return;
+  if (!client) {
+    showToast("Supabase no configurado");
+    return;
+  }
   const { data, error } = await client
     .from("gallinero_state")
-    .select("data, updated_at")
+    .select("data")
     .eq("id", supabaseSettings().rowId)
     .maybeSingle();
   if (error) {
-    showToast("No se pudo sincronizar");
+    showToast("Error al cargar datos");
     return;
   }
-  if (!data?.data) {
-    await syncStateToSupabase({ silent: true });
-    return;
+  if (data?.data) {
+    state = migrateState(data.data);
   }
-  isApplyingRemoteState = true;
-  const localSnapshot = structuredClone(state);
-  state = mergeStateForSync(data.data, localSnapshot, lastSyncedState);
-  const shouldUploadMergedState = !sameStatePart(state, data.data);
-  lastSyncedState = structuredClone(state);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   render();
-  isApplyingRemoteState = false;
-  hasSyncedOnce = true;
-  if (shouldUploadMergedState) await syncStateToSupabase({ silent: true });
-  showToast("Datos sincronizados");
+  showToast("Datos cargados");
 }
 
-async function syncStateToSupabase(options = {}) {
-  if (isApplyingRemoteState) return;
+async function saveToSupabase() {
+  if (isSaving) return;
   const client = getSupabaseClient();
   if (!client) return;
-  if (isSyncingToSupabase) {
-    pendingSupabaseSync = true;
-    return;
-  }
-  isSyncingToSupabase = true;
-  let error = null;
-  const localSnapshot = structuredClone(state);
-  let desiredState = structuredClone(localSnapshot);
-  try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const { data: remoteRow, error: readError } = await client
-        .from("gallinero_state")
-        .select("data, updated_at")
-        .eq("id", supabaseSettings().rowId)
-        .maybeSingle();
-      if (readError) {
-        error = readError;
-        break;
-      }
-
-      if (remoteRow?.data) {
-        desiredState = mergeStateForSync(remoteRow.data, localSnapshot, lastSyncedState);
-      } else {
-        desiredState = structuredClone(localSnapshot);
-      }
-
-      const nextUpdatedAt = new Date().toISOString();
-      if (!remoteRow) {
-        const { error: insertError } = await client.from("gallinero_state").insert({
-          id: supabaseSettings().rowId,
-          data: desiredState,
-          updated_at: nextUpdatedAt,
-        });
-        if (!insertError) {
-          error = null;
-          break;
-        }
-        error = insertError;
-        continue;
-      }
-
-      const { data: updatedRow, error: updateError } = await client
-        .from("gallinero_state")
-        .update({
-          data: desiredState,
-          updated_at: nextUpdatedAt,
-        })
-        .eq("id", supabaseSettings().rowId)
-        .eq("updated_at", remoteRow.updated_at)
-        .select("updated_at")
-        .maybeSingle();
-      if (!updateError && updatedRow) {
-        error = null;
-        break;
-      }
-      error = updateError || new Error("La nube cambio durante el guardado");
-    }
-
-    if (!error) {
-      state = migrateState(desiredState);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      render();
-      lastSyncedState = structuredClone(state);
-      hasSyncedOnce = true;
-    }
-  } finally {
-    isSyncingToSupabase = false;
-  }
-  if (error && !options.silent) showToast("Guardado local, sin sincronizar");
-  if (pendingSupabaseSync) {
-    pendingSupabaseSync = false;
-    syncStateToSupabase({ silent: options.silent });
-  }
+  isSaving = true;
+  const snapshot = structuredClone(state);
+  const { error } = await client
+    .from("gallinero_state")
+    .upsert({ id: supabaseSettings().rowId, data: snapshot, updated_at: new Date().toISOString() });
+  isSaving = false;
+  if (error) showToast("Error al guardar en la nube");
 }
 
 function showToast(message) {
@@ -1876,10 +1665,9 @@ document.addEventListener("DOMContentLoaded", () => {
       selectedYear = Number(incomeEntry.date.slice(0, 4));
       selectedMonth = Number(incomeEntry.date.slice(5, 7)) - 1;
       state.hens = state.flocks.Gallinas;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       render();
       showToast(isEditing ? "Ingreso actualizado" : "Ingreso guardado");
-      syncStateToSupabase();
+      saveToSupabase();
       // Stay on income tab, clear fields to add more
       clearIncomeFormFields();
       setIncomeMode(kind); // keep same mode
@@ -1928,10 +1716,9 @@ document.addEventListener("DOMContentLoaded", () => {
     selectedYear = Number(entry.date.slice(0, 4));
     selectedMonth = Number(entry.date.slice(5, 7)) - 1;
     state.hens = state.flocks.Gallinas;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     render();
     showToast("Guardado");
-    syncStateToSupabase();
+    saveToSupabase();
     editingEntryId = null;
     resetDailyFormForNextEntry();
     setActiveTab("home");
