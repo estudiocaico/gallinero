@@ -277,11 +277,12 @@ function mergeStateForSync(remoteRaw, localRaw, baseRaw) {
     if (localEntries.has(key)) return;
     const baseEntry = baseEntries.get(key);
     if (baseEntry) {
-      // Entry was in base AND in remote but local deleted it → trust the deletion, don't re-add
+      // Entry existed in base, local deleted it → trust the deletion.
+      // Must explicitly remove it from the map (it was pre-loaded during initialization).
+      remoteEntries.delete(key);
       return;
     }
-    // Entry is new on remote (wasn't in base at all) → add it locally
-    remoteEntries.set(key, remoteEntry);
+    // Entry is brand-new on remote (not in base) → keep it (already in map from init)
   });
 
   merged.daily = [...remoteEntries.values()];
